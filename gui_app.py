@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from postgres_connection import test_postgres_connection
+from mongodb_connection import test_mongo_connection, get_mongo_data
 
 
 class ConverterGUI:
@@ -12,8 +13,8 @@ class ConverterGUI:
         self.root.minsize(1100, 700)
         self.root.configure(bg="#edf2f7")
 
-        self.current_source = tk.StringVar(value="PostgreSQL")
-        self.current_target = tk.StringVar(value="MongoDB")
+        self.current_source = tk.StringVar(value="MongoDB")
+        self.current_target = tk.StringVar(value="PostgreSQL")
 
         self.source_entries = {}
         self.target_entries = {}
@@ -269,6 +270,9 @@ class ConverterGUI:
                     entry.insert(0, "27017")
                 elif model_name == "Neo4j":
                     entry.insert(0, "7687")
+            elif field == "database":
+                if model_name == "MongoDB":
+                    entry.insert(0, "db_converter")
 
             entries[field] = entry
 
@@ -305,33 +309,60 @@ class ConverterGUI:
             messagebox.showwarning("Brak danych", message)
             return
 
-        if model != "PostgreSQL":
-            self.log(f"Test połączenia dla {model} nie jest jeszcze dostępny.")
-            messagebox.showinfo(
-                "Informacja",
-                f"Test połączenia dla {model} nie jest jeszcze dostępny."
-            )
+        if model == "PostgreSQL":
+            try:
+                result = test_postgres_connection(
+                    data["host"],
+                    data["port"],
+                    data["database"],
+                    data["user"],
+                    data["password"]
+                )
+
+                if result:
+                    self.log("Połączenie z PostgreSQL działa poprawnie.")
+                    messagebox.showinfo("Sukces", "Połączenie z PostgreSQL działa poprawnie.")
+                else:
+                    self.log("Nie udało się połączyć z PostgreSQL.")
+                    messagebox.showerror("Błąd", "Nie udało się połączyć z PostgreSQL.")
+
+            except Exception as e:
+                self.log(f"Błąd podczas testu połączenia z PostgreSQL: {str(e)}")
+                messagebox.showerror("Błąd", str(e))
             return
 
-        try:
-            result = test_postgres_connection(
-                data["host"],
-                data["port"],
-                data["database"],
-                data["user"],
-                data["password"]
-            )
+        if model == "MongoDB":
+            try:
+                result = test_mongo_connection(
+                    data["host"],
+                    data["port"],
+                    data["database"]
+                )
 
-            if result:
-                self.log("Połączenie z PostgreSQL działa poprawnie.")
-                messagebox.showinfo("Sukces", "Połączenie z PostgreSQL działa poprawnie.")
-            else:
-                self.log("Nie udało się połączyć z PostgreSQL.")
-                messagebox.showerror("Błąd", "Nie udało się połączyć z PostgreSQL.")
+                if not result:
+                    self.log("Nie udało się połączyć z MongoDB.")
+                    messagebox.showerror("Błąd", "Nie udało się połączyć z MongoDB.")
+                    return
 
-        except Exception as e:
-            self.log(f"Błąd podczas testu połączenia: {str(e)}")
-            messagebox.showerror("Błąd", str(e))
+                mongo_data = get_mongo_data(
+                    data["host"],
+                    data["port"],
+                    data["database"]
+                )
+
+                self.log(f"Połączenie z MongoDB działa poprawnie. Liczba dokumentów: {len(mongo_data)}")
+                messagebox.showinfo("Sukces", "Połączenie z MongoDB działa poprawnie.")
+
+            except Exception as e:
+                self.log(f"Błąd podczas testu połączenia z MongoDB: {str(e)}")
+                messagebox.showerror("Błąd", str(e))
+            return
+
+        self.log(f"Test połączenia dla {model} nie jest jeszcze dostępny.")
+        messagebox.showinfo(
+            "Informacja",
+            f"Test połączenia dla {model} nie jest jeszcze dostępny."
+        )
 
     def convert_data(self):
         source_model = self.current_source.get()
@@ -358,9 +389,34 @@ class ConverterGUI:
             return
 
         self.log(f"Wybrano konwersję: {source_model} -> {target_model}")
+
+        if source_model == "MongoDB":
+            try:
+                mongo_data = get_mongo_data(
+                    source_data["host"],
+                    source_data["port"],
+                    source_data["database"]
+                )
+
+                self.log(f"Pobrano {len(mongo_data)} dokumentów z MongoDB.")
+                self.log("Dane z kolekcji 'osoby':")
+
+                for osoba in mongo_data:
+                    self.log(str(osoba))
+
+                messagebox.showinfo(
+                    "Sukces",
+                    f"Odczytano {len(mongo_data)} dokumentów z MongoDB."
+                )
+
+            except Exception as e:
+                self.log(f"Błąd podczas odczytu danych z MongoDB: {str(e)}")
+                messagebox.showerror("Błąd", str(e))
+            return
+
         messagebox.showinfo(
             "Informacja",
-            f"Wybrano konwersję: {source_model} -> {target_model}"
+            f"Konwersja {source_model} -> {target_model} nie jest jeszcze zaimplementowana."
         )
 
     def clear_log(self):
