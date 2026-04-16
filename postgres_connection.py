@@ -1,15 +1,17 @@
-from sqlalchemy import create_engine
-
-DB_USER = "postgres"
-DB_PASSWORD = "portal"
-DB_HOST = "localhost"
-DB_PORT = "5432"
-DB_NAME = "db_converter"
+import psycopg2
 
 
-def get_postgres_engine():
-    DATABASE_URL = (
-        f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}"
-        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    )
-    return create_engine(DATABASE_URL)
+def test_postgres_connection(host, port, database, user, password):
+    try:
+        connection = psycopg2.connect(
+            host=host,
+            port=port,
+            database=database,
+            user=user,
+            password=password
+        )
+        connection.close()
+        return True
+    except Exception as e:
+        print("Błąd PostgreSQL:", e)
+        return False
