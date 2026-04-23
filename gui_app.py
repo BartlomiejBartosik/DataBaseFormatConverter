@@ -1,23 +1,25 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+import json
 
-from postgres_connection import test_postgres_connection
 from mongodb_connection import test_mongo_connection, get_mongo_data
+from postgres_connection import test_postgres_connection, get_postgres_data
 
 
 class ConverterGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Database Format Converter")
-        self.root.geometry("1180x760")
-        self.root.minsize(1100, 700)
+        self.root.geometry("1300x780")
+        self.root.minsize(1200, 720)
         self.root.configure(bg="#edf2f7")
 
-        self.current_source = tk.StringVar(value="MongoDB")
+        self.current_source = tk.StringVar(value="PostgreSQL")
         self.current_target = tk.StringVar(value="PostgreSQL")
 
         self.source_entries = {}
         self.target_entries = {}
+        self.current_documents = []
 
         self.setup_styles()
         self.build_ui()
@@ -117,14 +119,59 @@ class ConverterGUI:
         content = ttk.Frame(main, style="Main.TFrame")
         content.pack(fill="both", expand=True)
 
-        left_panel = ttk.Frame(content, style="Card.TFrame", padding=20)
-        left_panel.pack(side="left", fill="y", padx=(0, 16))
+        self.build_scrollable_left_panel(content)
 
         right_panel = ttk.Frame(content, style="Card.TFrame", padding=20)
         right_panel.pack(side="left", fill="both", expand=True)
 
-        self.build_left_panel(left_panel)
         self.build_right_panel(right_panel)
+
+    def build_scrollable_left_panel(self, parent):
+        outer_left = ttk.Frame(parent, style="Card.TFrame")
+        outer_left.pack(side="left", fill="y", padx=(0, 16))
+
+        canvas = tk.Canvas(
+            outer_left,
+            bg="#ffffff",
+            highlightthickness=0,
+            width=330
+        )
+        canvas.pack(side="left", fill="y", expand=False)
+
+        scrollbar = ttk.Scrollbar(
+            outer_left,
+            orient="vertical",
+            command=canvas.yview
+        )
+        scrollbar.pack(side="right", fill="y")
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        left_panel = ttk.Frame(canvas, style="Card.TFrame", padding=20)
+        canvas_window = canvas.create_window((0, 0), window=left_panel, anchor="nw")
+
+        def update_scrollregion(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def resize_inner_frame(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+
+        left_panel.bind("<Configure>", update_scrollregion)
+        canvas.bind("<Configure>", resize_inner_frame)
+
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def bind_mousewheel(_event):
+            canvas.bind_all("<MouseWheel>", on_mousewheel)
+
+        def unbind_mousewheel(_event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind("<Enter>", bind_mousewheel)
+        canvas.bind("<Leave>", unbind_mousewheel)
+
+        self.build_left_panel(left_panel)
 
     def build_left_panel(self, parent):
         ttk.Label(
@@ -194,11 +241,12 @@ class ConverterGUI:
             style="SectionTitle.TLabel"
         ).pack(anchor="w", pady=(0, 10))
 
-        text_container = tk.Frame(parent, bg="#0b132b", bd=1, relief="solid")
-        text_container.pack(fill="both", expand=True)
+        log_container = tk.Frame(parent, bg="#0b132b", bd=1, relief="solid")
+        log_container.pack(fill="x", pady=(0, 16))
 
         self.log_text = tk.Text(
-            text_container,
+            log_container,
+            height=10,
             bg="#0b132b",
             fg="#e2e8f0",
             insertbackground="white",
@@ -208,7 +256,62 @@ class ConverterGUI:
             padx=12,
             pady=12
         )
-        self.log_text.pack(fill="both", expand=True)
+        self.log_text.pack(fill="x", expand=False)
+
+        ttk.Label(
+            parent,
+            text="Dane z PostgreSQL",
+            style="SectionTitle.TLabel"
+        ).pack(anchor="w", pady=(0, 10))
+
+        table_container = tk.Frame(parent, bg="#ffffff", bd=1, relief="solid")
+        table_container.pack(fill="both", expand=True, pady=(0, 16))
+
+        columns = ("id", "document")
+        self.documents_tree = ttk.Treeview(
+            table_container,
+            columns=columns,
+            show="headings",
+            height=10
+        )
+        self.documents_tree.heading("id", text="ID / klucz")
+        self.documents_tree.heading("document", text="Podgląd rekordu")
+
+        self.documents_tree.column("id", width=180, anchor="w")
+        self.documents_tree.column("document", width=700, anchor="w")
+
+        tree_scroll_y = ttk.Scrollbar(table_container, orient="vertical", command=self.documents_tree.yview)
+        tree_scroll_x = ttk.Scrollbar(table_container, orient="horizontal", command=self.documents_tree.xview)
+
+        self.documents_tree.configure(yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
+
+        self.documents_tree.pack(side="left", fill="both", expand=True)
+        tree_scroll_y.pack(side="right", fill="y")
+        tree_scroll_x.pack(side="bottom", fill="x")
+
+        self.documents_tree.bind("<<TreeviewSelect>>", self.show_selected_document)
+
+        ttk.Label(
+            parent,
+            text="Szczegóły wybranego rekordu",
+            style="SectionTitle.TLabel"
+        ).pack(anchor="w", pady=(0, 10))
+
+        details_container = tk.Frame(parent, bg="#111827", bd=1, relief="solid")
+        details_container.pack(fill="both", expand=True)
+
+        self.document_details = tk.Text(
+            details_container,
+            bg="#111827",
+            fg="#f8fafc",
+            insertbackground="white",
+            relief="flat",
+            wrap="word",
+            font=("Consolas", 10),
+            padx=12,
+            pady=12
+        )
+        self.document_details.pack(fill="both", expand=True)
 
         self.log("Aplikacja uruchomiona.")
 
@@ -273,6 +376,11 @@ class ConverterGUI:
             elif field == "database":
                 if model_name == "MongoDB":
                     entry.insert(0, "db_converter")
+                entry.insert(0, "db_converter")
+            elif field == "user":
+                entry.insert(0, "postgres")
+            elif field == "table":
+                entry.insert(0, "users")
 
             entries[field] = entry
 
@@ -281,7 +389,7 @@ class ConverterGUI:
 
     def get_fields_for_model(self, model_name):
         if model_name == "PostgreSQL":
-            return ["host", "port", "database", "user", "password"]
+            return ["host", "port", "database", "user", "password", "table"]
         elif model_name == "MongoDB":
             return ["host", "port", "database"]
         elif model_name == "Neo4j":
@@ -299,6 +407,48 @@ class ConverterGUI:
             if not value:
                 return False, f"Pole '{key}' nie może być puste."
         return True, ""
+
+    def display_records(self, records, id_field=None):
+        self.current_documents = records
+
+        for item in self.documents_tree.get_children():
+            self.documents_tree.delete(item)
+
+        self.document_details.delete("1.0", tk.END)
+
+        for index, record in enumerate(records):
+            record_id = "brak id"
+
+            if id_field and id_field in record:
+                record_id = record[id_field]
+            elif "_id" in record:
+                record_id = record["_id"]
+            elif "id" in record:
+                record_id = record["id"]
+
+            preview_text = json.dumps(record, ensure_ascii=False, default=str)
+
+            if len(preview_text) > 120:
+                preview_text = preview_text[:120] + "..."
+
+            self.documents_tree.insert("", "end", iid=str(index), values=(record_id, preview_text))
+
+    def show_selected_document(self, event=None):
+        selected = self.documents_tree.selection()
+        if not selected:
+            return
+
+        item_id = selected[0]
+        index = int(item_id)
+
+        if index < 0 or index >= len(self.current_documents):
+            return
+
+        document = self.current_documents[index]
+
+        self.document_details.delete("1.0", tk.END)
+        formatted = json.dumps(document, indent=4, ensure_ascii=False, default=str)
+        self.document_details.insert(tk.END, formatted)
 
     def test_source(self):
         model = self.current_source.get()
@@ -319,42 +469,30 @@ class ConverterGUI:
                     data["password"]
                 )
 
-                if result:
-                    self.log("Połączenie z PostgreSQL działa poprawnie.")
-                    messagebox.showinfo("Sukces", "Połączenie z PostgreSQL działa poprawnie.")
-                else:
+                if not result:
                     self.log("Nie udało się połączyć z PostgreSQL.")
                     messagebox.showerror("Błąd", "Nie udało się połączyć z PostgreSQL.")
+                    return
+
+                postgres_data = get_postgres_data(
+                    data["host"],
+                    data["port"],
+                    data["database"],
+                    data["user"],
+                    data["password"],
+                    data["table"]
+                )
+
+                self.display_records(postgres_data, id_field="id")
+
+                self.log(f"Połączenie z PostgreSQL działa poprawnie. Liczba rekordów: {len(postgres_data)}")
+                messagebox.showinfo(
+                    "Sukces",
+                    f"Połączenie z PostgreSQL działa poprawnie.\nPobrano {len(postgres_data)} rekordów."
+                )
 
             except Exception as e:
                 self.log(f"Błąd podczas testu połączenia z PostgreSQL: {str(e)}")
-                messagebox.showerror("Błąd", str(e))
-            return
-
-        if model == "MongoDB":
-            try:
-                result = test_mongo_connection(
-                    data["host"],
-                    data["port"],
-                    data["database"]
-                )
-
-                if not result:
-                    self.log("Nie udało się połączyć z MongoDB.")
-                    messagebox.showerror("Błąd", "Nie udało się połączyć z MongoDB.")
-                    return
-
-                mongo_data = get_mongo_data(
-                    data["host"],
-                    data["port"],
-                    data["database"]
-                )
-
-                self.log(f"Połączenie z MongoDB działa poprawnie. Liczba dokumentów: {len(mongo_data)}")
-                messagebox.showinfo("Sukces", "Połączenie z MongoDB działa poprawnie.")
-
-            except Exception as e:
-                self.log(f"Błąd podczas testu połączenia z MongoDB: {str(e)}")
                 messagebox.showerror("Błąd", str(e))
             return
 
@@ -390,27 +528,27 @@ class ConverterGUI:
 
         self.log(f"Wybrano konwersję: {source_model} -> {target_model}")
 
-        if source_model == "MongoDB":
+        if source_model == "PostgreSQL":
             try:
-                mongo_data = get_mongo_data(
+                postgres_data = get_postgres_data(
                     source_data["host"],
                     source_data["port"],
-                    source_data["database"]
+                    source_data["database"],
+                    source_data["user"],
+                    source_data["password"],
+                    source_data["table"]
                 )
 
-                self.log(f"Pobrano {len(mongo_data)} dokumentów z MongoDB.")
-                self.log("Dane z kolekcji 'osoby':")
+                self.display_records(postgres_data, id_field="id")
 
-                for osoba in mongo_data:
-                    self.log(str(osoba))
-
+                self.log(f"Pobrano {len(postgres_data)} rekordów z PostgreSQL.")
                 messagebox.showinfo(
                     "Sukces",
-                    f"Odczytano {len(mongo_data)} dokumentów z MongoDB."
+                    f"Odczytano {len(postgres_data)} rekordów z PostgreSQL."
                 )
 
             except Exception as e:
-                self.log(f"Błąd podczas odczytu danych z MongoDB: {str(e)}")
+                self.log(f"Błąd podczas odczytu danych z PostgreSQL: {str(e)}")
                 messagebox.showerror("Błąd", str(e))
             return
 
@@ -421,6 +559,10 @@ class ConverterGUI:
 
     def clear_log(self):
         self.log_text.delete("1.0", tk.END)
+        for item in self.documents_tree.get_children():
+            self.documents_tree.delete(item)
+        self.document_details.delete("1.0", tk.END)
+        self.current_documents = []
         self.log("Log wyczyszczony.")
 
     def log(self, message):
