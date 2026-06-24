@@ -1,0 +1,3 @@
+Data;Źródło;Cel;Liczba rekordów;Tryb;Konwersja [s];RAM [MB];Rozmiar [MB];Odczyt [ms]
+2026-06-24 20:53:22;MongoDB;PostgreSQL;3;-;0.3839;44.63;0.00;0.0000
+2026-06-24 20:54:24;PostgreSQL;MongoDB;10150;Referencing;6.2317;64.57;1.58;8.7689
